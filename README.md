@@ -1,23 +1,30 @@
 ---
-title: Reachy Language Tutor
-emoji: 🗣️
-colorFrom: blue
+title: Reachy Heartsong
+emoji: 💓
+colorFrom: pink
 colorTo: green
 sdk: static
 pinned: false
-short_description: Spoken language tutor for Reachy Mini, powered by ElevenLabs
+short_description: Your heartbeat wakes Reachy Mini; it talks in your language and moves to your pulse
 tags:
  - reachy_mini
  - reachy_mini_python_app
 ---
 
-# Reachy Language Tutor
+# Reachy Heartsong 💓
 
-Practice a language out loud with Reachy Mini. Reachy's mic streams to an
-[ElevenLabs Agent](https://elevenlabs.io/docs/agents-platform) (speech-to-text, LLM, and
-text-to-speech in one websocket). Its voice plays through Reachy's speaker, the head
-wobbles in time with the speech, and the agent calls gesture tools: it nods when you get
-something right, shakes its head before a correction, and wiggles its antennas to celebrate.
+*Beating in Sync*, a CS334 interactive installation by Mathias Becerra and Victoria Virgen.
+
+A visitor rests a fingertip on a glowing pulse sensor and their heartbeat wakes Reachy Mini. Its
+antennas twitch with every beat, then it greets them, using what its camera sees, and talks with
+them in their own language (30 of the world's most-spoken, switching as they do). Their pulse keeps
+shaping how Reachy breathes and sways, and Victoria's *Pulse Art* turns it into flowing light on the
+big screen. Reachy asks about what moves their heart, and when they say goodbye it goes back to
+sleep until the next heartbeat.
+
+Built on [ElevenLabs Agents](https://elevenlabs.io/docs/agents-platform) (speech-to-text, LLM and
+expressive text-to-speech over one websocket), the Reachy Mini SDK, and an analog pulse sensor on an
+Arduino.
 
 ## Setup
 
@@ -27,26 +34,24 @@ pip install -e .
 python -m reachy_language_tutor.main
 ```
 
-Open http://localhost:8043, pick a language, level and activity, then press **Start lesson**.
-
-On the first run the app creates an agent called "Reachy Language Tutor" in your
-ElevenLabs account and stores its id in `.agent_state.json`. Each lesson updates that
-agent's prompt, language and first message before connecting.
+Flash `arduino/heart_a0/heart_a0.ino` to the sensor board and plug it in over USB. Open
+http://localhost:8043 for the control page (Pulse Art is in the Heart card; **Full screen on TV**
+puts it on a second screen). Reachy sleeps until a heartbeat arrives. With no sensor, choose
+*Fake heart* in the Heart card.
 
 ## Notes
 
-- **Half-duplex by default.** The mic is muted while Reachy talks so it doesn't hear
-  itself. Tick "Let me interrupt Reachy" to turn on barge-in.
-- **Languages.** 83 languages, from Afrikaans to Yoruba. Speech uses `eleven_v4_turbo`
-  (90+ languages, low latency) and recognition uses Scribe v2 Realtime. The agent writes
-  its own opening greeting in the chosen language, so there are no per-language strings to
-  maintain.
-- **Pick the language you'll speak.** It sets what speech recognition expects. With clear
-  audio Reachy can follow you into another language, but in a noisy room recognition falls
-  back to the selected language (it even translates into it), so switch the dropdown.
-- **Voice.** Set `ELEVENLABS_VOICE_ID` to choose a voice. Expressive mode is off: it made
-  the LLM wrap real words in `[brackets]`, which the voice then skipped.
-- **LLM.** `ELEVENLABS_LLM` picks the model the agent uses.
+- **Interrupting.** "Let me interrupt Reachy" (on by default) lets visitors talk over Reachy. The mic
+  is gated against Reachy's own voice, so it never interrupts itself.
+- **Languages.** The 30 most-spoken languages ElevenLabs Agents support; Reachy switches when the
+  visitor does. Speech uses `eleven_v4_turbo`, recognition Scribe v2 Realtime.
+- **Pick the language you'll speak.** It sets what speech recognition expects. With clear audio
+  Reachy can follow you into another language, but in a noisy room switch the dropdown.
+- **Expressive voice and gestures.** Reachy starts replies with one tag from a fixed list
+  (`[laughs]`, `[happy]`, `[nods]`, ...). The voice acts it out and the app plays the matching
+  body gesture. The list is fixed because, left to itself, the model bracketed real words.
+- **Voice / LLM.** `ELEVENLABS_VOICE_ID` picks a voice, `ELEVENLABS_LLM` the model.
+- **Connection drops** reconnect automatically and pick up the conversation where it was.
 
 ## Heartbeat interaction
 

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reachy Conversation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Reachy Conversation</h1>
+      <div id="status" class="pill">idle</div>
+    </header>
+
+    <div id="keyWarning" class="warning" hidden>
+      No ElevenLabs API key. Put <code>ELEVENLABS_API_KEY=...</code> in
+      <code>reachy_language_tutor/.env</code> and restart the app.
+    </div>
+    <div id="error" class="warning" hidden></div>
+    <div id="sensorWarning" class="warning" hidden>
+      <strong>Heart sensor not connected.</strong> Reachy can't feel a pulse, so it won't wake up.
+      Check the sensor board's USB cable (it reconnects by itself within a second).
+    </div>
+
+    <section class="card" id="setup">
+      <label>Language you'll speak <select id="language"></select></label>
+      <p class="hint">Reachy hears best in this language. It can follow you into another one when it hears you clearly, but in a noisy room switch this to the new language. Changing it restarts the conversation.</p>
+      <label class="check"><input type="checkbox" id="bargeIn" checked> Let me interrupt Reachy (talk over it to cut in)</label>
+      <div class="row buttons">
+        <button id="startBtn" class="primary">Start talking</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <button id="pauseBtn" class="pause" title="Freeze Reachy's movement and turn off camera analysis. The conversation keeps going.">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>
+          <span>Pause motion &amp; camera</span>
+        </button>
+        <button id="sleepBtn" class="sleep" title="End the conversation and put Reachy to sleep">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M14.5 2.5a9.5 9.5 0 1 0 7 15.9A8 8 0 0 1 14.5 2.5z"/></svg>
+          <span>Stop &amp; sleep</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card heart-card">
+      <div class="heart-head">
+        <div class="heart-live">
+          <span id="heartIcon" class="heart-icon" aria-hidden="true">♥</span>
+          <span id="heartBpm" class="heart-bpm">--</span><span class="heart-unit">BPM</span>
+        </div>
+        <span id="heartState" class="pill">waiting</span>
+      </div>
+      <div class="art" id="art">
+        <iframe id="artFrame" src="/visuals?embed=1" title="Pulse Art by Victoria Virgen" allow="fullscreen" allowfullscreen></iframe>
+        <div class="art-bar">
+          <span class="art-credit">Pulse Art · Victoria Virgen</span>
+          <button id="artFull" class="art-btn" title="Full screen. Drag this window to the TV first.">⛶ Full screen on TV</button>
+          <a class="art-btn" href="/visuals" target="_blank" rel="noopener" title="Open in its own window, for a second screen">Open in new window ↗</a>
+        </div>
+      </div>
+      <div id="heartSource" class="hint"></div>
+      <div class="row wrap toggles">
+        <label>Heart sensor
+          <select id="hSource">
+            <option value="serial">Sensor on USB</option>
+            <option value="fake">Fake heart (testing)</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label>Visit flow
+          <select id="hFlow">
+            <option value="heart">Heartbeat starts each visit</option>
+            <option value="showcase">Camera welcomes, heart joins later</option>
+          </select>
+        </label>
+        <label>Reachy's rhythm
+          <select id="hMode">
+            <option value="mirror">Mirror their pulse</option>
+            <option value="entrain">Breathe slower (entrain)</option>
+          </select>
+        </label>
+      </div>
+      <div id="fakeControls" class="row wrap toggles fake" hidden>
+        <label class="check"><input type="checkbox" id="fFinger"> Finger on sensor</label>
+        <label class="slider">Fake BPM <input type="range" id="fBpm" min="45" max="150" step="1" value="72"> <output id="fBpmOut">72</output></label>
+      </div>
+      <div class="row wrap toggles">
+        <label class="check"><input type="checkbox" id="hThump" checked> Soft thump on each beat while syncing</label>
+      </div>
+      <p class="hint">Space bar taps a beat by hand. Heart data is only shown live and is never saved. This is an art piece, not a medical reading.</p>
+    </section>
+
+    <section class="card">
+      <div class="camera">
+        <img id="cam" src="/api/camera.mjpg" alt="Reachy's camera view">
+        <div id="camOff" class="cam-off" hidden>
+          <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M10.6 6H14l1.5 2H19a2 2 0 0 1 2 2v7.5M17 19H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h1.5M9.5 10.6a3 3 0 0 0 3.9 3.9"/></svg>
+          <span id="camOffText">Camera paused</span>
+        </div>
+        <div class="cam-badges">
+          <span id="attn" class="badge">looking around</span>
+          <span id="fps" class="badge muted"></span>
+        </div>
+      </div>
+      <div class="row wrap toggles">
+        <label class="check"><input type="checkbox" id="follow" checked> Follow me with its head</label>
+        <label class="check"><input type="checkbox" id="react" checked> React to what it sees (greets, waves back)</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div id="mode" class="mode">Reachy is resting</div>
+      <div id="transcript" class="transcript"><p class="empty">The conversation will appear here.</p></div>
+      <form id="textForm" class="row">
+        <input id="textInput" placeholder="Or type a message…" autocomplete="off" disabled>
+        <button type="submit" id="sendBtn" disabled>Send</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="label">Test gestures</div>
+      <div id="gestures" class="row wrap"></div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

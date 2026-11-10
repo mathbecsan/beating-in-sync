@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.egg-info/
+.agent_state.json
+.DS_Store

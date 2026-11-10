@@ -1,0 +1,89 @@
+:root {
+  --bg: #f6f5f2; --card: #fff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e2dd;
+  --accent: #2f6fe4; --accent-ink: #fff; --user: #eef3fd; --agent: #f2f1ee; --warn: #fdf0e6; --warn-ink: #8a4b12;
+  --sleep-bg: #ecebfb; --sleep-ink: #4b44b8; --sleep-line: #d6d3f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141416; --card: #1d1d20; --ink: #ececef; --muted: #9a9aa2; --line: #2e2e33;
+    --accent: #5b8ef0; --user: #1f2a40; --agent: #26262b; --warn: #3a2a1c; --warn-ink: #f3c79a;
+    --sleep-bg: #26244a; --sleep-ink: #a9a3ff; --sleep-line: #3a3770;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 16px; }
+header { display: flex; align-items: center; justify-content: space-between; }
+h1 { font-size: 22px; margin: 0; }
+.pill { font-size: 13px; padding: 3px 10px; border-radius: 99px; background: var(--agent); color: var(--muted); }
+.pill.connected { background: #1f9d55; color: #fff; }
+.pill.connecting { background: #d68a1a; color: #fff; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
+.row { display: flex; gap: 12px; }
+.row > * { flex: 1; }
+.wrap { flex-wrap: wrap; }
+.wrap > * { flex: 0 0 auto; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+label.check { display: flex; align-items: center; gap: 8px; }
+input, select, textarea, button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+button { cursor: pointer; background: var(--card); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.buttons > *, #textForm button { flex: 0 0 auto; }
+button.pause { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+button.pause.resume { background: #138a72; color: #fff; border-color: #138a72; }
+.cam-off { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #111114; color: #b9b9c2; font-size: 14px; }
+.cam-off[hidden] { display: none; }
+.badge.paused { background: rgba(19, 138, 114, .95); }
+button.sleep { display: inline-flex; align-items: center; gap: 6px; background: var(--sleep-bg); color: var(--sleep-ink); border-color: var(--sleep-line); }
+button.sleep:hover:not(:disabled) { filter: brightness(0.96); }
+button.sleep.waking { background: #f4b43a; color: #2b1d00; border-color: #f4b43a; }
+.pill.sleeping { background: #5b54d6; color: #fff; }
+.warning { background: var(--warn); color: var(--warn-ink); border-radius: 10px; padding: 12px 14px; }
+.mode { font-weight: 600; }
+.transcript { max-height: 420px; overflow-y: auto; display: grid; gap: 8px; }
+.transcript p { margin: 0; padding: 8px 12px; border-radius: 10px; max-width: 85%; }
+.transcript .user { background: var(--user); justify-self: end; }
+.transcript .agent { background: var(--agent); justify-self: start; }
+.transcript .empty { color: var(--muted); }
+.label { font-size: 13px; color: var(--muted); }
+.hint { margin: -6px 0 0; font-size: 12px; color: var(--muted); }
+.camera { position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+.camera img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-badges { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; }
+.badge { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: rgba(0, 0, 0, .6); color: #fff; backdrop-filter: blur(4px); }
+.badge.face { background: rgba(31, 157, 85, .9); }
+.badge.voice, .badge.motion { background: rgba(214, 138, 26, .9); }
+.badge.muted { color: #cfcfd4; }
+.toggles { gap: 18px; }
+.transcript .event { justify-self: center; background: none; color: var(--muted); font-size: 13px; padding: 2px 8px; }
+@media (max-width: 520px) { .row:not(.buttons):not(.wrap):not(#textForm) { flex-direction: column; } }
+.buttons { flex-wrap: wrap; }
+.heart-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.heart-live { display: flex; align-items: baseline; gap: 6px; }
+.heart-icon { color: #e0356b; font-size: 26px; display: inline-block; transition: transform .12s ease-out; }
+.heart-icon.beat { transform: scale(1.35); }
+.heart-icon.off { color: var(--muted); opacity: .5; }
+.heart-bpm { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.heart-unit { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+.visuals-link { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; }
+.heart-wave { width: 100%; height: 60px; background: var(--bg); border-radius: 8px; }
+.pill.syncing { background: #e0356b; color: #fff; }
+.pill.connected.heart, .pill.heart-connected { background: #1f9d55; color: #fff; }
+.pill.waking { background: #d68a1a; color: #fff; }
+.pill.searching, .pill.goodbye { background: #6b6b70; color: #fff; }
+.fake { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+.fake[hidden] { display: none; }
+label.slider { display: flex; align-items: center; gap: 8px; }
+label.slider input { padding: 0; }
+
+.art { position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+.art iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.art-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: linear-gradient(transparent, rgba(0,0,0,.65)); opacity: 0; transition: opacity .25s; }
+.art:hover .art-bar, .art:focus-within .art-bar { opacity: 1; }
+@media (hover: none) { .art-bar { opacity: 1; } }
+.art-credit { color: rgba(255,255,255,.7); font-size: 12px; margin-right: auto; }
+.art-btn { font-size: 13px; padding: 5px 10px; border-radius: 7px; background: rgba(255,255,255,.14); color: #fff;
+  border: 1px solid rgba(255,255,255,.25); text-decoration: none; cursor: pointer; }
+.art-btn:hover { background: rgba(255,255,255,.24); }

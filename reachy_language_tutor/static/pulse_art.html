@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse Art</title>
+<!--
+  Pulse Art by Victoria Virgen (victoria/pulse_art.py), ported to the browser so it can run
+  full screen on the TV, fed by the Reachy app's sensor stream. The look follows her pygame
+  version: 20 ribbons echoing the live pulse, a bright "hero" line, and an additive glow.
+  Beats come from the app, so the screen pulses on the same beat Reachy moves to.
+  Keys: F full screen, S signal panel, H info line, C caption.
+-->
+<style>
+  :root { --bg: #000; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body.hide-cursor { cursor: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .embed body.hide-cursor { cursor: default; }
+  .embed .caption { font-size: clamp(12px, 3.2vw, 32px); bottom: 7vh; }
+  .caption { position: fixed; left: 0; right: 0; bottom: 5vh; text-align: center; color: rgba(255,255,255,.7);
+    font: 300 clamp(16px, 2.2vw, 32px)/1.3 -apple-system, system-ui, sans-serif; letter-spacing: .05em;
+    transition: opacity 1.2s; pointer-events: none; }
+</style>
+</head>
+<body class="hide-cursor">
+<script>
+  // Embedded in the app page: keep the cursor, and size the caption to the panel.
+  if (new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("embed");
+</script>
+<canvas id="screen"></canvas>
+<div class="caption" id="caption"></div>
+<script>
+// ------------------------------------------------------------- settings (from pulse_art.py)
+const WINDOW_S = 5.0, VIEW_S = 4.0, N_LINES = 20, N_POINTS = 110;
+const ADC_LO = 3, ADC_HI = 1020;
+const BEAT_THRESHOLD = 0.65;
+const SUPPORT_BRIGHTNESS = 0.35, SINE_AMOUNT = 0.02, HERO_SMOOTH = 7, HERO_WIDTH = 3;
+
+const screen = document.getElementById("screen");
+const sctx = screen.getContext("2d");
+const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+// Glow = the image shrunk and blown back up (pygame smoothscale to 1/4 and 1/12). Shrinking
+// in one jump only samples a few pixels of a thin line, which came back as bright dots, so we
+// halve step by step (each step averages 2x2 pixels, like smoothscale does).
+const halves = [1, 2, 3, 4].map(() => document.createElement("canvas")); // 1/2, 1/4, 1/8, 1/16
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = 1; // a TV is 1080p (or 4K upscaling it); the glow is soft anyway
+  W = screen.width = canvas.width = Math.round(innerWidth * DPR);
+  H = screen.height = canvas.height = Math.round(innerHeight * DPR);
+  halves.forEach((c, i) => { c.width = Math.max(1, W >> (i + 1)); c.height = Math.max(1, H >> (i + 1)); });
+}
+addEventListener("resize", resize); resize();
+
+// ------------------------------------------------------------- samples from the app
+// Raw A0 readings with the app's sample clock; mapped onto this page's clock.
+const buf = { t: [], v: [], rejected: 0, rejectTimes: [] };
+let offset = null; // page time - app time
+let S = { state: "waiting", bpm: 0, finger: false, beats: 0, source: "serial" };
+let lastBeats = null, energy = 0;
+// How much of the live signal reaches the ribbons. Only a confirmed pulse (the app's finger
+// detection: ~5 steady, heart-like beats) shows; noise, bumps and touches leave the art calm.
+let live = 0;
+const beatTimes = [];
+const nowS = () => performance.now() / 1000;
+
+function push(t, v) {
+  if (v <= ADC_LO || v >= ADC_HI) { buf.rejected++; buf.rejectTimes.push(t); if (buf.rejectTimes.length > 400) buf.rejectTimes.shift(); return; }
+  buf.t.push(t); buf.v.push(v);
+  const cutoff = t - WINDOW_S;
+  let k = 0; while (k < buf.t.length && buf.t[k] < cutoff) k++;
+  if (k) { buf.t.splice(0, k); buf.v.splice(0, k); }
+}
+
+function connect() {
+  const es = new EventSource("/api/heart/stream");
+  es.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    // Clock offset: smallest observed (page - app) keeps samples from appearing in the future.
+    const off = nowS() - d.now;
+    offset = offset === null ? off : Math.min(offset + 0.002, off);
+    for (const [t, v] of d.raw || []) push(t + offset, v);
+    S = d;
+    if (lastBeats !== null && d.beats > lastBeats && d.finger && live > 0.5) { energy = 1; beatTimes.push(nowS()); if (beatTimes.length > 30) beatTimes.shift(); }
+    lastBeats = d.beats;
+  };
+  es.onerror = () => { es.close(); setTimeout(connect, 1500); };
+}
+connect();
+
+// ------------------------------------------------------------- analysis (Analyzer)
+const A = { lo: null, hi: null, hasSignal: false };
+function percentile(sorted, p) {
+  const i = (sorted.length - 1) * p / 100, a = Math.floor(i), b = Math.min(sorted.length - 1, a + 1);
+  return sorted[a] + (sorted[b] - sorted[a]) * (i - a);
+}
+function analyze(dt) {
+  energy *= Math.exp(-dt / 0.35);
+  A.hasSignal = false;
+  const ts = buf.t, vs = buf.v, n = vs.length;
+  if (n < 100 || ts[n - 1] - ts[0] < 2.0) return null;
+  // ~60 ms moving average, edge-padded so the newest samples aren't dragged toward 0
+  const sm = new Float64Array(n), k = 15, half = 7;
+  let acc = 0;
+  const at = (i) => vs[Math.max(0, Math.min(n - 1, i))];
+  for (let i = -half; i <= half; i++) acc += at(i);
+  for (let i = 0; i < n; i++) { sm[i] = acc / k; acc += at(i + half + 1) - at(i - half); }
+  const sorted = Float64Array.from(sm).sort();
+  const lo = percentile(sorted, 2), hi = percentile(sorted, 99.5);
+  if (hi - lo < 4) return null; // flat: finger is off the sensor
+  if (A.lo === null) { A.lo = lo; A.hi = hi; } else { A.lo += (lo - A.lo) * 0.05; A.hi += (hi - A.hi) * 0.05; }
+  const norm = new Float64Array(n);
+  for (let i = 0; i < n; i++) norm[i] = Math.max(0, Math.min(1.1, (sm[i] - A.lo) / (A.hi - A.lo)));
+  A.hasSignal = true;
+  return { ts, norm };
+}
+
+// ------------------------------------------------------------- rendering
+const palette = []; // pink -> purple -> blue -> cyan -> green, left to right
+for (let j = 0; j < N_POINTS; j++) {
+  const x = j / (N_POINTS - 1), h = 0.92 - 0.54 * x;
+  palette.push(hsv(h, 0.75, 1.0));
+}
+function hsv(h, s, v) {
+  const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i % 6];
+  return [r * 255, g * 255, b * 255];
+}
+const xs = Array.from({ length: N_POINTS }, (_, j) => j / (N_POINTS - 1));
+const env = xs.map((x) => Math.pow(Math.sin(Math.PI * x), 0.4)); // taper toward the edges
+
+function interp(x, xp, fp, left, right) {
+  if (x <= xp[0]) return left;
+  if (x >= xp[xp.length - 1]) return right;
+  let lo = 0, hi = xp.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xp[m] <= x) lo = m; else hi = m; }
+  const u = (x - xp[lo]) / (xp[hi] - xp[lo] || 1);
+  return fp[lo] + (fp[hi] - fp[lo]) * u;
+}
+
+function signalAt(analysis, tNow, delay, k) {
+  const out = new Float64Array(N_POINTS);
+  if (!analysis) return out;
+  const { ts, norm } = analysis, last = norm[norm.length - 1];
+  const sig = xs.map((x) => interp(tNow - VIEW_S + x * VIEW_S - delay, ts, norm, 0.5, last) - 0.5);
+  // moving average of width k, edge-padded (np.convolve mode="same")
+  const pad = (i) => sig[Math.max(0, Math.min(N_POINTS - 1, i))];
+  const a = Math.floor((k - 1) / 2), b = k - 1 - a;
+  for (let i = 0; i < N_POINTS; i++) { let s = 0; for (let j = i - b; j <= i + a; j++) s += pad(j); out[i] = s / k * live; }
+  return out;
+}
+
+// The palette runs left to right, so one horizontal gradient per line reproduces the
+// per-segment colors of the pygame version in a single stroke.
+const STOPS = 12;
+function polyline(ys, colorFor, width) {
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  for (let s = 0; s <= STOPS; s++) {
+    const j = Math.round(s / STOPS * (N_POINTS - 1));
+    g.addColorStop(s / STOPS, colorFor(j));
+  }
+  ctx.strokeStyle = g; ctx.lineWidth = width; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  // Smooth curve through the points (midpoint quadratics) instead of straight segments.
+  ctx.beginPath(); ctx.moveTo(0, ys[0]);
+  for (let j = 1; j < N_POINTS - 1; j++) {
+    const mx = (xs[j] + xs[j + 1]) / 2 * W, my = (ys[j] + ys[j + 1]) / 2;
+    ctx.quadraticCurveTo(xs[j] * W, ys[j], mx, my);
+  }
+  ctx.lineTo(W, ys[N_POINTS - 1]);
+  ctx.stroke();
+}
+
+function render(tNow, analysis) {
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  const cy = H * 0.5;
+  // supporting ribbons: dim, delayed, smoothed echoes + decorative sines
+  for (let i = 0; i < N_LINES; i++) {
+    const u = i / (N_LINES - 1), mid = 1 - Math.abs(2 * u - 1);
+    const sig = signalAt(analysis, tNow, u * 1.2, 7 + Math.floor(u * 22));
+    const freq = 0.7 + 1.3 * ((i * 0.618) % 1), phase = i * 0.9, speed = 0.25 + 0.35 * ((i * 0.37) % 1);
+    const ys = xs.map((x, j) => {
+      const sine = Math.sin(2 * Math.PI * freq * x + phase + tNow * speed) * H * SINE_AMOUNT * (0.6 + 0.9 * energy);
+      return cy - env[j] * (sig[j] * H * 0.55 * (0.35 + 0.65 * mid) + sine + (u - 0.5) * H * 0.14);
+    });
+    const b = Math.min(1, SUPPORT_BRIGHTNESS * (0.3 + 0.7 * mid) * (0.8 + 0.4 * energy));
+    polyline(ys, (j) => `rgb(${palette[j][0] * b | 0},${palette[j][1] * b | 0},${palette[j][2] * b | 0})`, DPR);
+  }
+  // hero line: live pulse, barely smoothed, no delay, thick and bright
+  const sig = signalAt(analysis, tNow, 0, HERO_SMOOTH);
+  const ys = xs.map((x, j) => {
+    const wobble = Math.sin(2 * Math.PI * 1.1 * x + tNow * 0.4) * H * 0.015;
+    return cy - (0.35 + 0.65 * env[j]) * (sig[j] * H * 0.55 + wobble);
+  });
+  polyline(ys, (j) => {
+    const c = palette[j].map((v) => Math.min(255, v * (0.9 + 0.1 * energy) + 110 * energy) | 0);
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  }, HERO_WIDTH * DPR);
+}
+
+function applyGlow() {
+  let src = canvas;
+  for (const c of halves) {
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+    g.clearRect(0, 0, c.width, c.height);
+    g.drawImage(src, 0, 0, c.width, c.height);
+    src = c;
+  }
+  sctx.globalCompositeOperation = "source-over";
+  sctx.drawImage(canvas, 0, 0);
+  sctx.globalCompositeOperation = "lighter";
+  sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = "high";
+  // 1/4 once (tight glow), then a soft wide halo between 1/8 and 1/16 (≈ her 1/12, twice).
+  sctx.drawImage(halves[1], 0, 0, W, H);
+  sctx.drawImage(halves[2], 0, 0, W, H);
+  sctx.drawImage(halves[3], 0, 0, W, H);
+  sctx.globalCompositeOperation = "source-over";
+}
+
+function drawSignalPanel(analysis, tNow) {
+  const ph = Math.round(H * 0.27), half = ph >> 1, y0 = H - ph;
+  const tx = (t) => (t - (tNow - WINDOW_S)) / WINDOW_S * (W - 1);
+  sctx.fillStyle = "rgb(12,12,18)"; sctx.fillRect(0, y0, W, ph);
+  sctx.strokeStyle = "rgb(40,40,55)"; sctx.lineWidth = 1;
+  sctx.beginPath(); sctx.moveTo(0, y0 + half); sctx.lineTo(W, y0 + half); sctx.stroke();
+  sctx.font = `${13 * DPR}px -apple-system, system-ui, sans-serif`; sctx.fillStyle = "rgb(120,120,140)";
+  const vs = buf.v, ts = buf.t;
+  if (vs.length > 2) {
+    let lo = Infinity, hi = -Infinity; for (const v of vs) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    const span = Math.max(hi - lo, 1);
+    sctx.strokeStyle = "rgb(150,150,165)"; sctx.beginPath();
+    vs.forEach((v, i) => { const x = tx(ts[i]), y = y0 + half - 8 - (v - lo) / span * (half - 24); i ? sctx.lineTo(x, y) : sctx.moveTo(x, y); });
+    sctx.stroke();
+    sctx.fillText(`raw ADC after spike removal   min ${lo | 0}  max ${hi | 0}  range ${(hi - lo) | 0}`, 8 * DPR, y0 + 15 * DPR);
+  } else sctx.fillText("raw ADC: no data yet", 8 * DPR, y0 + 15 * DPR);
+  sctx.strokeStyle = "rgb(230,60,60)";
+  for (const t of buf.rejectTimes) { const x = tx(t); if (x >= 0 && x < W) { sctx.beginPath(); sctx.moveTo(x, y0 + 2); sctx.lineTo(x, y0 + 8); sctx.stroke(); } }
+  const top2 = y0 + half + 18, bot2 = y0 + ph - 6, thr = bot2 - BEAT_THRESHOLD * (bot2 - top2);
+  sctx.strokeStyle = "rgb(70,70,40)"; sctx.beginPath(); sctx.moveTo(0, thr); sctx.lineTo(W, thr); sctx.stroke();
+  if (analysis) {
+    sctx.strokeStyle = "rgb(90,220,230)"; sctx.lineWidth = 2; sctx.beginPath();
+    analysis.norm.forEach((v, i) => { const x = tx(analysis.ts[i]), y = bot2 - Math.min(v, 1) * (bot2 - top2); i ? sctx.lineTo(x, y) : sctx.moveTo(x, y); });
+    sctx.stroke();
+  }
+  sctx.strokeStyle = "rgb(255,90,190)"; sctx.lineWidth = 2;
+  for (const tb of beatTimes) { const x = tx(tb); if (x >= 0 && x < W) { sctx.beginPath(); sctx.moveTo(x, y0 + half + 14); sctx.lineTo(x, y0 + ph); sctx.stroke(); } }
+  sctx.fillStyle = "rgb(120,120,140)";
+  sctx.fillText("normalized 0-1 (cyan)   beat threshold (yellow line)   detected beats (pink, from the Reachy app)", 8 * DPR, y0 + half + 15 * DPR);
+}
+
+// ------------------------------------------------------------- main loop
+const CAPTIONS = {
+  waiting: "Rest a finger on the lights to wake Reachy",
+  waking: "Reachy feels you…", syncing: "Reachy is feeling your heartbeat",
+  connected: "", searching: "Reachy is looking for you", goodbye: "Goodbye for now",
+};
+let showInfo = false, showSignal = false, showCaption = true;
+let last = performance.now(), frames = 0, fps = 0, fpsT = last;
+
+function frame(nowMs) {
+  const dt = Math.min(0.1, (nowMs - last) / 1000); last = nowMs;
+  frames++; if (nowMs - fpsT > 1000) { fps = frames * 1000 / (nowMs - fpsT); frames = 0; fpsT = nowMs; }
+  const tNow = nowMs / 1000;
+  const analysis = analyze(dt);
+  live += ((S.finger ? 1 : 0) - live) * (1 - Math.exp(-dt / (S.finger ? 0.8 : 0.5)));
+  render(tNow, analysis);
+  applyGlow();
+  if (showSignal) drawSignalPanel(analysis, tNow);
+  if (showInfo) {
+    const status = A.hasSignal && S.bpm ? `${Math.round(S.bpm)} bpm` : !A.hasSignal ? "waiting for pulse..." : "locking on...";
+    sctx.font = `${15 * DPR}px -apple-system, system-ui, sans-serif`; sctx.fillStyle = "rgb(150,150,170)";
+    sctx.fillText(`${status}   dropped spikes: ${buf.rejected}   fps: ${fps.toFixed(0)}   reachy: ${S.state}`, 14 * DPR, 24 * DPR);
+  }
+  const cap = !showCaption || (S.state === "waiting" && S.finger) ? "" : (CAPTIONS[S.state] ?? "");
+  const el = document.getElementById("caption");
+  if (el.textContent !== cap && cap) el.textContent = cap;
+  el.style.opacity = cap ? 1 : 0;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (k === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  else if (k === "s") showSignal = !showSignal;
+  else if (k === "h") showInfo = !showInfo;
+  else if (k === "c") showCaption = !showCaption;
+});
+addEventListener("dblclick", () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
+</script>
+</body>
+</html>
